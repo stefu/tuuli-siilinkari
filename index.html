@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Siilinkarin tuuli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;700&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: one column, live reading strip on top, chart below, source line at bottom */
+:root {
+  --bg: #f3f6f8;
+  --surface: #ffffff;
+  --fg: #14232e;
+  --muted: #5a6d7a;
+  --line: #d9e2e8;
+  --wind: #1f6f9f;
+  --gust: #d9822b;
+  --dir: #5e8a3a;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e171d; --surface: #15222b; --fg: #e4edf2; --muted: #93a7b4;
+    --line: #2a3a45; --wind: #5bb0e3; --gust: #f0a35a; --dir: #9cc97a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e171d; --surface: #15222b; --fg: #e4edf2; --muted: #93a7b4;
+  --line: #2a3a45; --wind: #5bb0e3; --gust: #f0a35a; --dir: #9cc97a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+}
+.wrap { max-width: 960px; margin: 0 auto; display: grid; gap: 20px; }
+header h1 { font: 700 2rem/1.1 var(--display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+header p { margin: 4px 0 0; color: var(--muted); }
+.now { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.tile .lbl { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.tile .val { font: 700 2.2rem/1.1 var(--display); font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; }
+.tile .val small { font: 500 1rem var(--body); color: var(--muted); }
+.tile .sub { font-size: .85rem; color: var(--muted); }
+#ws { color: var(--wind); } #wg { color: var(--gust); }
+#arrow { width: 30px; height: 30px; transition: transform .4s; }
+@media (prefers-reduced-motion: reduce) { #arrow { transition: none; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, #refresh {
+  font: 500 .875rem var(--body); color: var(--fg); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--wind); border-color: var(--wind); color: var(--surface); }
+button:focus-visible { outline: 2px solid var(--wind); outline-offset: 2px; }
+.chart-box { position: relative; height: 360px; }
+#status { font-size: .85rem; color: var(--muted); min-height: 1.3em; }
+#status.err { color: var(--gust); }
+footer { font-size: .8rem; color: var(--muted); }
+footer a { color: var(--wind); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Näsijärvi, Siilinkari</h1>
+    <p>Keskituuli, puuskat ja tuulen suunta, Ilmatieteen laitoksen minuuttihavainnot</p>
+  </header>
+
+  <section class="now" aria-label="Viimeisin havainto">
+    <div class="tile"><div class="lbl">Keskituuli (10 min)</div><div class="val"><span id="ws">–</span><small>m/s</small></div><div class="sub" id="bft">&nbsp;</div></div>
+    <div class="tile"><div class="lbl">Puuska (10 min)</div><div class="val"><span id="wg">–</span><small>m/s</small></div><div class="sub" id="maxg">&nbsp;</div></div>
+    <div class="tile"><div class="lbl">Suunta</div><div class="val">
+      <svg id="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18 20 L12 16 L6 20 Z" fill="currentColor"/></svg>
+      <span id="wd">–</span></div><div class="sub" id="wdtxt">&nbsp;</div></div>
+    <div class="tile"><div class="lbl">Havaittu</div><div class="val" id="t" style="font-size:1.6rem">–</div><div class="sub" id="age">&nbsp;</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Aikaväli">
+        <button id="m30" data-m="30" aria-pressed="true">30 min</button>
+        <button id="m60" data-m="60">60 min</button>
+        <button id="m90" data-m="90">90 min</button>
+        <button id="m120" data-m="120">120 min</button>
+      </div>
+      <button id="refresh">Päivitä</button>
+    </div>
+    <div class="chart-box"><canvas id="chart" aria-label="Tuulen nopeus, puuskat ja suunta ajan funktiona"></canvas></div>
+    <div id="status">Haetaan havaintoja…</div>
+  </section>
+
+  <footer>
+    Lähde: <a href="https://www.ilmatieteenlaitos.fi/avoin-data" target="_blank" rel="noopener">Ilmatieteen laitoksen avoin data</a> (CC BY 4.0),
+    asema Tampere Siilinkari (fmisid 101311). Arvot ovat 10 minuutin liukuvia keskiarvoja ja maksimeja, jotka päivittyvät minuutin välein.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const FMISID = 101311;
+const WFS = "https://opendata.fmi.fi/wfs";
+const hours = 2; let mins = 30, chart = null, lastData = null;
+
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const DIRS = ["pohjoinen","koillinen","itä","kaakko","etelä","lounas","länsi","luode"];
+const BFT = [[0.3,"tyyntä"],[1.6,"heikkoa"],[3.4,"heikkoa"],[5.5,"kohtalaista"],[8.0,"kohtalaista"],[10.8,"navakkaa"],[13.9,"kovaa"],[17.2,"kovaa"],[20.8,"myrskyä"],[Infinity,"kovaa myrskyä"]];
+const fmtTime = d => d.toLocaleTimeString("fi-FI", {hour:"2-digit", minute:"2-digit"});
+
+async function load() {
+  $("status").className = ""; $("status").textContent = "Haetaan havaintoja…";
+  const end = new Date(), start = new Date(end - hours * 3600e3);
+  const p = new URLSearchParams({
+    service: "WFS", version: "2.0.0", request: "getFeature",
+    storedquery_id: "fmi::observations::weather::simple",
+    fmisid: FMISID, parameters: "ws_10min,wg_10min,wd_10min",
+    starttime: start.toISOString().slice(0,19) + "Z",
+    endtime: end.toISOString().slice(0,19) + "Z",
+    timestep: 1
+  });
+  try {
+    const res = await fetch(WFS + "?" + p);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
+    const rows = new Map();
+    for (const el of xml.getElementsByTagNameNS("*", "BsWfsElement")) {
+      const t = el.getElementsByTagNameNS("*", "Time")[0].textContent;
+      const name = el.getElementsByTagNameNS("*", "ParameterName")[0].textContent;
+      const v = parseFloat(el.getElementsByTagNameNS("*", "ParameterValue")[0].textContent);
+      if (!rows.has(t)) rows.set(t, { t: new Date(t) });
+      rows.get(t)[name] = Number.isFinite(v) ? v : null;
+    }
+    const data = [...rows.values()].sort((a, b) => a.t - b.t);
+    while (data.length && data[data.length-1].ws_10min == null) data.pop();
+    if (!data.length) throw new Error("Asemalta ei saatu havaintoja tälle aikavälille.");
+    lastData = data; render();
+    $("status").textContent = `${data.length} havaintoa, päivitetty ${new Date().toLocaleTimeString("fi-FI", {hour:"2-digit", minute:"2-digit"})}`;
+  } catch (e) {
+    const snapEnd = new Date(SNAP[SNAP.length - 1][0]);
+    const data = SNAP.filter(r => new Date(r[0]) > snapEnd - hours * 3600e3)
+      .map(r => ({ t: new Date(r[0]), ws_10min: r[1], wg_10min: r[2], wd_10min: r[3] }));
+    lastData = data; render();
+    $("status").className = "err";
+    $("status").textContent = `Live-haku ei onnistunut tässä näkymässä (${e.message}). Näytetään tallennetut havainnot ${fmtTime(snapEnd)} asti.`
+
+  }
+}
+// Tallennettu tilannekuva FMI:n havainnoista (fmisid 101311), käytetään jos live-haku estyy.
+const SNAP = [["2026-11-23T17:06:00Z",12.8,16.1,7.0],["2026-11-23T17:07:00Z",12.8,16.1,7.0],["2026-11-23T17:08:00Z",12.8,16.1,7.0],["2026-11-23T17:09:00Z",12.8,15.3,7.0],["2026-11-23T17:10:00Z",13.0,16.7,8.0],["2026-11-23T17:11:00Z",13.0,16.7,8.0],["2026-11-23T17:12:00Z",13.0,16.7,8.0],["2026-11-23T17:13:00Z",13.0,16.7,8.0],["2026-11-23T17:14:00Z",12.9,16.7,9.0],["2026-11-23T17:15:00Z",12.9,16.7,10.0],["2026-11-23T17:16:00Z",12.7,16.7,10.0],["2026-11-23T17:17:00Z",12.7,16.7,10.0],["2026-11-23T17:18:00Z",12.8,16.7,10.0],["2026-11-23T17:19:00Z",12.6,16.7,9.0],["2026-11-23T17:20:00Z",12.4,15.4,9.0],["2026-11-23T17:21:00Z",12.5,15.5,9.0],["2026-11-23T17:22:00Z",12.7,17.1,9.0],["2026-11-23T17:23:00Z",12.7,17.1,10.0],["2026-11-23T17:24:00Z",12.9,17.5,10.0],["2026-11-23T17:25:00Z",13.1,17.5,9.0],["2026-11-23T17:26:00Z",13.2,17.5,10.0],["2026-11-23T17:27:00Z",13.1,17.5,9.0],["2026-11-23T17:28:00Z",13.1,17.5,10.0],["2026-11-23T17:29:00Z",13.2,17.5,11.0],["2026-11-23T17:30:00Z",13.2,17.5,11.0],["2026-11-23T17:31:00Z",13.3,17.5,11.0],["2026-11-23T17:32:00Z",13.2,17.5,11.0],["2026-11-23T17:33:00Z",13.4,17.5,10.0],["2026-11-23T17:34:00Z",13.2,15.9,10.0],["2026-11-23T17:35:00Z",13.1,15.9,11.0],["2026-11-23T17:36:00Z",13.1,15.9,11.0],["2026-11-23T17:37:00Z",13.0,15.9,12.0],["2026-11-23T17:38:00Z",13.0,15.9,13.0],["2026-11-23T17:39:00Z",13.1,15.9,12.0],["2026-11-23T17:40:00Z",13.2,15.9,12.0],["2026-11-23T17:41:00Z",13.1,15.8,12.0],["2026-11-23T17:42:00Z",13.0,15.7,12.0],["2026-11-23T17:43:00Z",12.8,15.7,13.0],["2026-11-23T17:44:00Z",12.7,15.7,13.0],["2026-11-23T17:45:00Z",12.8,15.7,14.0],["2026-11-23T17:46:00Z",12.7,15.7,13.0],["2026-11-23T17:47:00Z",12.8,15.7,12.0],["2026-11-23T17:48:00Z",12.7,15.7,12.0],["2026-11-23T17:49:00Z",12.6,15.7,12.0],["2026-11-23T17:50:00Z",12.3,15.5,12.0],["2026-11-23T17:51:00Z",12.4,15.5,11.0],["2026-11-23T17:52:00Z",12.4,15.5,12.0],["2026-11-23T17:53:00Z",12.6,15.5,12.0],["2026-11-23T17:54:00Z",12.6,15.5,12.0],["2026-11-23T17:55:00Z",12.5,15.4,11.0],["2026-11-23T17:56:00Z",12.5,15.4,10.0],["2026-11-23T17:57:00Z",12.6,15.4,10.0],["2026-11-23T17:58:00Z",12.8,15.4,10.0],["2026-11-23T17:59:00Z",12.8,15.4,9.0],["2026-11-23T18:00:00Z",13.0,15.4,9.0],["2026-11-23T18:01:00Z",12.9,15.1,9.0],["2026-11-23T18:02:00Z",12.8,15.1,8.0],["2026-11-23T18:03:00Z",12.6,15.1,7.0],["2026-11-23T18:04:00Z",12.3,15.1,7.0],["2026-11-23T18:05:00Z",12.3,15.1,6.0],["2026-11-23T18:06:00Z",12.1,15.0,7.0],["2026-11-23T18:07:00Z",12.1,15.0,7.0],["2026-11-23T18:08:00Z",11.8,15.0,7.0],["2026-11-23T18:09:00Z",11.7,15.0,7.0],["2026-11-23T18:10:00Z",11.6,15.0,6.0],["2026-11-23T18:11:00Z",11.5,14.3,6.0],["2026-11-23T18:12:00Z",11.5,14.9,7.0],["2026-11-23T18:13:00Z",11.7,14.9,8.0],["2026-11-23T18:14:00Z",11.9,14.9,8.0],["2026-11-23T18:15:00Z",11.9,14.9,8.0],["2026-11-23T18:16:00Z",12.1,14.9,8.0],["2026-11-23T18:17:00Z",12.0,14.9,8.0],["2026-11-23T18:18:00Z",12.3,15.2,8.0],["2026-11-23T18:19:00Z",12.4,15.2,8.0],["2026-11-23T18:20:00Z",12.3,15.2,8.0],["2026-11-23T18:21:00Z",12.3,15.2,8.0],["2026-11-23T18:22:00Z",12.3,15.2,7.0],["2026-11-23T18:23:00Z",12.2,15.2,6.0],["2026-11-23T18:24:00Z",12.2,15.2,6.0],["2026-11-23T18:25:00Z",12.1,15.2,6.0],["2026-11-23T18:26:00Z",12.2,15.2,6.0],["2026-11-23T18:27:00Z",12.2,15.2,6.0],["2026-11-23T18:28:00Z",12.0,14.8,6.0],["2026-11-23T18:29:00Z",11.9,14.8,6.0],["2026-11-23T18:30:00Z",12.0,14.8,6.0],["2026-11-23T18:31:00Z",11.9,14.8,5.0],["2026-11-23T18:32:00Z",11.9,14.8,6.0],["2026-11-23T18:33:00Z",11.8,14.8,6.0],["2026-11-23T18:34:00Z",11.6,14.8,6.0],["2026-11-23T18:35:00Z",11.6,14.8,5.0],["2026-11-23T18:36:00Z",11.4,14.0,5.0],["2026-11-23T18:37:00Z",11.4,14.0,5.0],["2026-11-23T18:38:00Z",11.3,13.8,4.0],["2026-11-23T18:39:00Z",11.3,13.8,3.0],["2026-11-23T18:40:00Z",11.3,13.9,3.0],["2026-11-23T18:41:00Z",11.3,13.9,3.0],["2026-11-23T18:42:00Z",11.2,13.9,3.0],["2026-11-23T18:43:00Z",11.3,13.9,2.0],["2026-11-23T18:44:00Z",11.3,13.9,2.0],["2026-11-23T18:45:00Z",11.4,14.6,2.0],["2026-11-23T18:46:00Z",11.4,14.6,3.0],["2026-11-23T18:47:00Z",11.5,14.6,2.0],["2026-11-23T18:48:00Z",11.5,14.6,4.0],["2026-11-23T18:49:00Z",11.4,14.6,5.0],["2026-11-23T18:50:00Z",11.4,14.6,5.0],["2026-11-23T18:51:00Z",11.5,14.9,6.0],["2026-11-23T18:52:00Z",11.6,14.9,6.0],["2026-11-23T18:53:00Z",11.6,14.9,6.0],["2026-11-23T18:54:00Z",11.8,14.9,7.0],["2026-11-23T18:55:00Z",11.7,14.9,8.0],["2026-11-23T18:56:00Z",11.7,14.9,8.0],["2026-11-23T18:57:00Z",11.8,14.9,8.0],["2026-11-23T18:58:00Z",11.9,14.9,7.0],["2026-11-23T18:59:00Z",12.1,14.9,7.0],["2026-11-23T19:00:00Z",12.1,14.9,7.0],["2026-11-23T19:01:00Z",12.1,14.9,7.0],["2026-11-23T19:02:00Z",12.2,14.9,7.0],["2026-11-23T19:03:00Z",12.1,14.9,7.0],["2026-11-23T19:04:00Z",12.1,14.9,7.0]];
+
+function render() {
+  if (!lastData) return;
+  const cut = lastData[lastData.length - 1].t - mins * 60e3;
+  const data = lastData.filter(r => r.t > cut);
+  const last = [...data].reverse().find(r => r.ws_10min != null) || data[data.length - 1];
+  $("ws").textContent = last.ws_10min != null ? last.ws_10min.toFixed(1) : "–";
+  $("wg").textContent = last.wg_10min != null ? last.wg_10min.toFixed(1) : "–";
+  if (last.ws_10min != null) $("bft").textContent = BFT.find(b => last.ws_10min < b[0])[1];
+  const maxG = Math.max(...data.map(r => r.wg_10min ?? -1));
+  $("maxg").textContent = maxG >= 0 ? `Jakson kovin ${maxG.toFixed(1)} m/s` : " ";
+  if (last.wd_10min != null) {
+    $("wd").textContent = Math.round(last.wd_10min) + "°";
+    $("wdtxt").textContent = "Tuulee suunnasta " + DIRS[Math.round(last.wd_10min / 45) % 8];
+    $("arrow").style.transform = `rotate(${last.wd_10min + 180}deg)`;
+  }
+  $("t").textContent = last.t.toLocaleTimeString("fi-FI", {hour:"2-digit", minute:"2-digit"});
+  const ageMin = Math.round((Date.now() - last.t) / 60000);
+  $("age").textContent = ageMin < 1 ? "juuri nyt" : `${ageMin} min sitten`;
+
+  const wind = css("--wind"), gust = css("--gust"), dir = css("--dir"), muted = css("--muted"), line = css("--line");
+  const ds = [
+    { label: "Keskituuli (m/s)", data: data.map(r => ({x: +r.t, y: r.ws_10min})), borderColor: wind,
+      backgroundColor: wind + "33", fill: "origin", borderWidth: 2, pointRadius: mins > 30 ? 0 : 2, tension: .25, spanGaps: true },
+    { label: "Puuska (m/s)", data: data.map(r => ({x: +r.t, y: r.wg_10min})), borderColor: gust,
+      borderWidth: 1.5, borderDash: [4, 3], pointRadius: 0, tension: .25, spanGaps: true, fill: false },
+    { label: "Suunta (°)", data: data.map(r => ({x: +r.t, y: r.wd_10min})), yAxisID: "y2", showLine: false,
+      borderColor: dir, backgroundColor: dir, pointRadius: mins > 60 ? 1.5 : 2.5, pointStyle: "rectRot" }
+  ];
+  if (chart) chart.destroy();
+  chart = new Chart($("chart"), {
+    type: "line",
+    data: { datasets: ds },
+    options: {
+      maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { type: "linear", min: +data[0].t, max: +data[data.length - 1].t, grid: { color: line },
+             afterBuildTicks: ax => {
+               const step = (mins > 60 ? 15 : mins > 30 ? 10 : 5) * 60e3, ticks = [];
+               const first = Math.ceil(ax.min / step) * step;
+               for (let v = first; v <= ax.max; v += step) if (v >= ax.min) ticks.push({ value: v });
+               ax.ticks = ticks;
+             },
+             ticks: { color: muted, autoSkip: true, maxRotation: 0,
+             callback: v => new Date(v).toLocaleString("fi-FI", {hour:"2-digit", minute:"2-digit"}) } },
+        y: { beginAtZero: true, grid: { color: line }, ticks: { color: muted },
+             title: { display: true, text: "m/s", color: muted } },
+        y2: { position: "right", min: 0, max: 360, grid: { drawOnChartArea: false },
+              afterBuildTicks: ax => { ax.ticks = [0, 90, 180, 270, 360].map(value => ({ value })); },
+              ticks: { color: muted, callback: v => ({0: "P", 90: "I", 180: "E", 270: "L", 360: "P"})[v] },
+              title: { display: true, text: "suunta", color: muted } }
+      },
+      plugins: {
+        legend: { labels: { color: muted, usePointStyle: true } },
+        tooltip: { callbacks: { title: items => fmtTime(new Date(items[0].parsed.x)),
+                                label: i => i.dataset.yAxisID === "y2" ? `Suunta: ${i.parsed.y == null ? "–" : Math.round(i.parsed.y) + "°"}` : `${i.dataset.label.replace(" (m/s)", "")}: ${i.parsed.y?.toFixed(1) ?? "–"} m/s` } }
+      }
+    }
+  });
+}
+
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  mins = +b.dataset.m;
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  render();
+}));
+$("refresh").addEventListener("click", load);
+setInterval(load, 60e3);
+load();
+</script>
+</body>
+</html>
