@@ -79,7 +79,7 @@ footer a { color: var(--wind); }
     <div class="tile"><div class="lbl">Suunta</div><div class="val">
       <svg id="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L18 20 L12 16 L6 20 Z" fill="currentColor"/></svg>
       <span id="wd">–</span></div><div class="sub" id="wdtxt">&nbsp;</div></div>
-    <div class="tile"><div class="lbl">Havaittu</div><div class="val" id="t" style="font-size:1.6rem">–</div><div class="sub" id="age">&nbsp;</div></div>
+    <div class="tile"><div class="lbl">Lämpötila</div><div class="val"><span id="temp">–</span><small>°C</small></div><div class="sub" id="tempt">&nbsp;</div></div>
   </section>
 
   <section class="panel">
@@ -120,7 +120,7 @@ async function load() {
   const p = new URLSearchParams({
     service: "WFS", version: "2.0.0", request: "getFeature",
     storedquery_id: "fmi::observations::weather::simple",
-    fmisid: FMISID, parameters: "ws_10min,wg_10min,wd_10min",
+    fmisid: FMISID, parameters: "ws_10min,wg_10min,wd_10min,t2m",
     starttime: start.toISOString().slice(0,19) + "Z",
     endtime: end.toISOString().slice(0,19) + "Z",
     timestep: 1
@@ -169,9 +169,12 @@ function render() {
     $("wdtxt").textContent = "Tuulee suunnasta " + DIRS[Math.round(last.wd_10min / 45) % 8];
     $("arrow").style.transform = `rotate(${last.wd_10min + 180}deg)`;
   }
-  $("t").textContent = last.t.toLocaleTimeString("fi-FI", {hour:"2-digit", minute:"2-digit"});
-  const ageMin = Math.round((Date.now() - last.t) / 60000);
-  $("age").textContent = ageMin < 1 ? "juuri nyt" : `${ageMin} min sitten`;
+  // Lämpötila mitataan 10 minuutin välein, joten haetaan koko datasta uusin oikea arvo.
+  const tl = [...lastData].reverse().find(r => r.t2m != null);
+  if (tl) {
+    $("temp").textContent = tl.t2m.toFixed(1).replace(".", ",").replace("-", "−");
+    $("tempt").textContent = "Mitattu " + fmtTime(tl.t);
+  }
 
   const wind = css("--wind"), gust = css("--gust"), dir = css("--dir"), muted = css("--muted"), line = css("--line");
   const ds = [
